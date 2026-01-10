@@ -35,6 +35,29 @@ Usage
    - Call LLM for classification
    - Save results to `out_step2_order_classification/TIMESTAMP/`
 
+Model Output Format
+-------------------
+
+The model returns a structured JSON with multiple orders:
+
+```json
+{
+  "classification": "order" | "not_order" | "needs_manual",
+  "confidence": 0.0-1.0,
+  "orders": [
+    {
+      "vip_number": "12345",
+      "items": [
+        {"product_code": "3000950", "qty": 2}
+      ],
+      "order_status": "order" | "needs_manual",
+      "reasons": ["explanation..."],
+      "questions_for_human": ["question..."]
+    }
+  ]
+}
+```
+
 Notes
 -----
 - `email_reader.py` does not perform HTTP calls to the model directly; the AI layer is in `ai/`.
@@ -43,3 +66,4 @@ Notes
 - Non-Excel attachments (PDF, images, etc.) are skipped entirely.
 - Emails are NOT marked as read by default. They are marked only when classification != `needs_manual` and confidence >= 0.85.
 - Each run creates a new timestamped folder for organization.
+- **Multi-order support**: One email can contain multiple orders (different VIP numbers).
