@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+credentials.json
+token.json
+
+# Runtime outputs
+out_step1_email_inputs/
+out_step2_order_classification/
+model_outputs/
+email_inputs/
+downloads/
+
+# Secrets
+.env
+credentials.json
+token.json
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs / temp
+*.log
+*_llm_error.txt
