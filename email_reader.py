@@ -56,7 +56,7 @@ os.makedirs(STEP2_DIR, exist_ok=True)
 MARK_AS_READ_AFTER_SAVE = False
 
 # Колко от текста да принтираме в конзолата (за debug)
-PRINT_BODY_CHARS = 2000
+PRINT_BODY_CHARS = 200
 
 
 # -----------------------------

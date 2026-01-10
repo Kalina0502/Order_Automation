@@ -25,6 +25,6 @@ def build_messages(email_payload: Dict) -> List[Dict]:
 
     messages = [
         {"role": "system", "content": system},
-        {"role": "user", "content": "Here is the email payload as JSON:\n" + user},
+        {"role": "user", "content": user},
     ]
     return messages

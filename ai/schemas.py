@@ -8,13 +8,26 @@ class Item(BaseModel):
     qty: int = Field(..., ge=0)
 
 
-class ModelOutput(BaseModel):
-    classification: str
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    vip_number: Optional[str] = ""
+class Order(BaseModel):
+    """Single order with VIP number and items."""
+    vip_number: str = ""
     items: List[Item] = []
+    order_status: str = "order"  # "order" or "needs_manual"
     reasons: List[str] = []
     questions_for_human: List[str] = []
+
+    @validator("order_status")
+    def order_status_must_be_known(cls, v):
+        if v not in {"order", "needs_manual"}:
+            raise ValueError("order_status must be: order or needs_manual")
+        return v
+
+
+class ModelOutput(BaseModel):
+    """Model output with support for multiple orders."""
+    classification: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    orders: List[Order] = []
 
     @validator("classification")
     def classification_must_be_known(cls, v):
@@ -32,4 +45,4 @@ def parse_and_validate(raw_text: str) -> ModelOutput:
     except Exception as e:
         raise ValueError(f"Failed to parse JSON from model output: {e}") from e
 
-    return ModelOutput.parse_obj(obj)
+    return ModelOutput.model_validate(obj)
