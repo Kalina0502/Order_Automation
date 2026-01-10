@@ -38,8 +38,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # Gmail scope за четене + маркиране като прочетено
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
-# Четем само главната поща (Primary tab), без Social/Promotions/Updates
-GMAIL_QUERY = "newer_than:7d -in:spam -in:trash category:primary"
+# Четем само главната поща (Primary tab), само непрочетени имейли
+GMAIL_QUERY = "is:unread newer_than:1d -in:spam -in:trash category:primary"
 MAX_EMAILS_PER_RUN = 20
 
 # Step 1: Extracted email data (organized by batch run timestamp)
@@ -446,6 +446,22 @@ def _save_json_atomic(obj: Any, path: str):
         json.dump(obj, f, ensure_ascii=False, indent=2, default=str)
 
 
+def create_minimal_payload_for_model(full_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Create a minimal payload for the model with only essential information:
+    - Email body text
+    - Extracted orders (VIP + products)
+
+    Removes all metadata, headers, raw Excel rows, etc.
+    """
+    minimal = {
+        "body_text": full_payload.get("body_text", ""),
+        "extracted_orders": full_payload.get("extracted_orders", [])
+    }
+
+    return minimal
+
+
 # -----------------------------
 # MAIN
 # -----------------------------
@@ -531,21 +547,16 @@ def main():
                     )
 
                     extracted = extract_orders_from_blanka_rows(rows)
-                    model_payload.setdefault("extracted_from_blanka", []).append({
-                        "filename": filename,
-                        "in_memory": True,
-                        "result": extracted,
-                    })
-                    print("📦 Extracted orders:", extracted)
 
-                    preview_text = excel_rows_to_text(rows, max_rows=50, max_cols=12)
-                    model_payload["excel_previews"].append({
-                        "filename": filename,
-                        "in_memory": True,
-                        "rows_count": len(rows),
-                        "preview_rows": rows[:50],
-                        "preview_text": preview_text,
-                    })
+                    # Store only extracted orders (VIP + products), not raw Excel rows
+                    if extracted.get("orders"):
+                        for order in extracted["orders"]:
+                            model_payload.setdefault("extracted_orders", []).append({
+                                "vip_number": order.get("vip_number", ""),
+                                "items": order.get("items", [])
+                            })
+
+                    print("📦 Extracted orders:", extracted)
 
                     print(f"  excel rows: {len(rows)}")
                     # покажи първите 5 реда за диагностика
@@ -588,7 +599,9 @@ def main():
         # 4) If LLM support is available, run the classification pipeline
         if build_messages and chat_completion and parse_and_validate:
             try:
-                messages = build_messages(model_payload)
+                # Create minimal payload for model (only body + extracted orders)
+                minimal_payload = create_minimal_payload_for_model(model_payload)
+                messages = build_messages(minimal_payload)
 
                 # Save request to step2/raw/
                 req_path = os.path.join(step2_raw_dir, f"{base_filename}_request.json")
