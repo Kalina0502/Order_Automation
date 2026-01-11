@@ -61,6 +61,7 @@ def classify_email(
     email_data: Dict[str, Any],
     base_filename: str,
     output_dirs: Dict[str, str],
+    email_id: str,
 ) -> Optional[Any]:
     """Classify a single email using LLM.
 
@@ -105,7 +106,18 @@ def classify_email(
             logging.error("Failed to parse response for %s", base_filename)
             return None
 
-        # 6) Save to classification-specific folder
+        # 6) Add email_id to each order in the parsed result
+        parsed_dict = parsed.model_dump()
+
+        # Add email_id to top-level
+        parsed_dict["email_id"] = email_id
+
+        # Add email_id to each order
+        if "orders" in parsed_dict:
+            for order in parsed_dict["orders"]:
+                order["email_id"] = email_id
+
+        # 7) Save to classification-specific folder
         classification = parsed.classification
         if classification == "order":
             target_dir = output_dirs["order"]
@@ -115,7 +127,7 @@ def classify_email(
             target_dir = output_dirs["needs_manual"]
 
         classified_path = os.path.join(target_dir, f"{base_filename}.json")
-        save_json_atomic(parsed.model_dump(), classified_path)
+        save_json_atomic(parsed_dict, classified_path)
         logging.info("Classification: %s (confidence: %.2f) → %s",
                      classification, parsed.confidence, classified_path)
 
@@ -211,8 +223,11 @@ def process_batch(batch_dir: str) -> Dict[str, int]:
             with open(email_path, "r", encoding="utf-8") as f:
                 email_data = json.load(f)
 
+            # Extract email_id (use message_id from Gmail)
+            email_id = email_data.get("message_id", base_filename)
+
             # Classify
-            parsed = classify_email(email_data, base_filename, output_dirs)
+            parsed = classify_email(email_data, base_filename, output_dirs, email_id)
 
             if parsed:
                 stats[parsed.classification] += 1
