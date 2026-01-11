@@ -9,6 +9,7 @@ Architecture
 -----------
 The project is organized into independent steps that can be run separately:
 
+- **Step 0** (step0_daily_offer_pdf.py): Extracts daily offer PDF from email and converts to readable text using AI Vision
 - **Step 1** (step1_email_reader.py): Reads Gmail emails and extracts order data
 - **Step 2** (step2_ai_order_validation.py): Classifies orders using LLM
 - **Step 3** (step3_reference_validation.py): Validates VIP numbers and product codes against reference data
@@ -18,6 +19,7 @@ Structure
 ---------
 
 project/
+├── step0_daily_offer_pdf.py     # Step 0: Daily offer PDF extraction
 ├── step1_email_reader.py        # Step 1: Gmail email extraction
 ├── step2_ai_order_validation.py # Step 2: LLM order classification
 ├── step3_reference_validation.py # Step 3: VIP & product code validation
@@ -32,6 +34,13 @@ project/
 ├── reference_data/              # Reference files for validation
 │   ├── VIP.xlsx                 # Valid VIP numbers
 │   └── product_codes.xls        # Valid product codes
+├── out_step0_daily_offer/       # Step 0 output (daily offer PDF + extracted text)
+│   └── YYYYMMDD_HHMMSS/         # Batch timestamp folder
+│       ├── pdf_raw/             # Downloaded PDF
+│       ├── extracted/           # Extracted text
+│       │   ├── text_full.txt    # Complete extracted text
+│       │   └── text_by_page.json # Text by page
+│       └── meta.json            # Extraction metadata
 ├── out_step1_email_inputs/      # Step 1 output (extracted emails)
 │   └── YYYYMMDD_HHMMSS/         # Batch timestamp folder
 │       └── *.json               # One JSON per email
@@ -72,17 +81,29 @@ Usage
 
 ### Running the Pipeline
 
-**Option A: Run both steps together (legacy)**
+**Step 0 - Extract Daily Offer (optional, run once per day):**
 ```bash
-python step1_email_reader.py
+# Using AI Vision (recommended - handles complex PDFs with custom fonts)
+python step0_daily_offer_pdf.py --ai-vision
+
+# Using AI Vision with GPT-4o (more accurate but slower/costlier)
+python step0_daily_offer_pdf.py --ai-vision --ai-model gpt-4o
+
+# Using OCR (fallback if AI Vision unavailable, requires Tesseract)
+python step0_daily_offer_pdf.py --ocr
+
+# Basic mode (tries PDF text layer only)
+python step0_daily_offer_pdf.py
 ```
-This will:
-- Extract emails from Gmail → `out_step1_email_inputs/TIMESTAMP/`
-- Note: Step 2 must be run separately now
+- Searches for latest email from `sales@green-master.eu`
+- Downloads daily offer PDF
+- Extracts text using AI Vision, OCR, or PDF text layer
+- Saves to `out_step0_daily_offer/TIMESTAMP/`
+- **AI Vision recommended**: Handles PDFs with custom font encoding and complex layouts
 
-**Option B: Run steps independently (recommended)**
+**Note**: For Step0 with AI Vision, install: `pip install pdf2image Pillow`
 
-Step 1 - Extract emails:
+**Step 1 - Extract emails:**
 ```bash
 python step1_email_reader.py
 ```
@@ -90,7 +111,7 @@ python step1_email_reader.py
 - Extracts Excel attachments in-memory (never saves to disk)
 - Saves email data to `out_step1_email_inputs/TIMESTAMP/`
 
-Step 2 - Classify with AI:
+**Step 2 - Classify with AI:**
 ```bash
 # Process latest batch
 python step2_ai_order_validation.py
@@ -102,7 +123,7 @@ python step2_ai_order_validation.py --batch 20260110_130000
 - Calls LLM for classification
 - Saves results to `out_step2_ai_order_validation/TIMESTAMP/`
 
-Step 3 - Validate against reference data:
+**Step 3 - Validate against reference data:**
 ```bash
 # Auto-detect latest batch (recommended)
 python step3_reference_validation.py
