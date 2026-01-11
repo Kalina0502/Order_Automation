@@ -11,7 +11,7 @@ token.json
 
 # Runtime outputs
 out_step1_email_inputs/
-out_step2_order_classification/
+out_step2_ai_order_validation/
 model_outputs/
 email_inputs/
 downloads/

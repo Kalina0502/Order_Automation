@@ -18,17 +18,6 @@ from typing import Any
 from dotenv import load_dotenv
 load_dotenv()
 
-# AI integration imports (kept minimal)
-try:
-    from ai.prompt_builder import build_messages
-    from ai.llm_client import chat_completion
-    from ai.schemas import parse_and_validate
-except Exception:
-    # If ai package missing, we'll still keep the rest of functionality working.
-    build_messages = None  # type: ignore
-    chat_completion = None  # type: ignore
-    parse_and_validate = None  # type: ignore
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 # -----------------------------
@@ -45,15 +34,6 @@ MAX_EMAILS_PER_RUN = 20
 # Step 1: Extracted email data (organized by batch run timestamp)
 STEP1_DIR = os.getenv("STEP1_DIR", "out_step1_email_inputs")
 os.makedirs(STEP1_DIR, exist_ok=True)
-
-# Step 2: Model classification (organized by batch run timestamp)
-STEP2_DIR = os.getenv("STEP2_DIR", "out_step2_order_classification")
-os.makedirs(STEP2_DIR, exist_ok=True)
-
-# Ако е True -> след като запишем payload-а, маркираме имейла като прочетен
-# По подразбиране НЕ маркираме имейлите като прочетени — маркиране става
-# само след успешно класифициране от модела според правилата.
-MARK_AS_READ_AFTER_SAVE = False
 
 # Колко от текста да принтираме в конзолата (за debug)
 PRINT_BODY_CHARS = 200
@@ -446,22 +426,6 @@ def _save_json_atomic(obj: Any, path: str):
         json.dump(obj, f, ensure_ascii=False, indent=2, default=str)
 
 
-def create_minimal_payload_for_model(full_payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Create a minimal payload for the model with only essential information:
-    - Email body text
-    - Extracted orders (VIP + products)
-
-    Removes all metadata, headers, raw Excel rows, etc.
-    """
-    minimal = {
-        "body_text": full_payload.get("body_text", ""),
-        "extracted_orders": full_payload.get("extracted_orders", [])
-    }
-
-    return minimal
-
-
 # -----------------------------
 # MAIN
 # -----------------------------
@@ -473,17 +437,6 @@ def main():
     step1_batch_dir = os.path.join(STEP1_DIR, batch_timestamp)
     os.makedirs(step1_batch_dir, exist_ok=True)
 
-    # Step 2 directory structure
-    step2_batch_dir = os.path.join(STEP2_DIR, batch_timestamp)
-    step2_raw_dir = os.path.join(step2_batch_dir, "raw")
-    step2_order_dir = os.path.join(step2_batch_dir, "order")
-    step2_not_order_dir = os.path.join(step2_batch_dir, "not_order")
-    step2_needs_manual_dir = os.path.join(step2_batch_dir, "needs_manual")
-
-    os.makedirs(step2_raw_dir, exist_ok=True)
-    os.makedirs(step2_order_dir, exist_ok=True)
-    os.makedirs(step2_not_order_dir, exist_ok=True)
-    os.makedirs(step2_needs_manual_dir, exist_ok=True)
     service = get_gmail_service()
 
     message_ids = list_message_ids(service, max_results=MAX_EMAILS_PER_RUN, query=GMAIL_QUERY)
@@ -596,97 +549,7 @@ def main():
         _save_json_atomic(model_payload, step1_json)
         logging.info("Saved email input to step1: %s", step1_json)
 
-        # 4) If LLM support is available, run the classification pipeline
-        if build_messages and chat_completion and parse_and_validate:
-            try:
-                # Create minimal payload for model (only body + extracted orders)
-                minimal_payload = create_minimal_payload_for_model(model_payload)
-                messages = build_messages(minimal_payload)
-
-                # Save request to step2/raw/
-                req_path = os.path.join(step2_raw_dir, f"{base_filename}_request.json")
-                _save_json_atomic(messages, req_path)
-
-                # Call LLM
-                model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-                logging.info("Calling LLM model=%s for %s", model_name, base_filename)
-                raw = chat_completion(messages=messages, model=model_name, temperature=0.0, timeout=int(os.getenv("OPENAI_TIMEOUT", "60")))
-
-                # Save raw response to step2/raw/
-                raw_path = os.path.join(step2_raw_dir, f"{base_filename}_raw.json")
-                _save_json_atomic(raw, raw_path)
-
-                # Extract assistant content (first choice)
-                try:
-                    assistant_text = ""
-                    choices = raw.get("choices") or []
-                    if choices:
-                        msg = choices[0].get("message") or {}
-                        assistant_text = msg.get("content", "")
-                except Exception:
-                    assistant_text = ""
-
-                parsed = None
-                parsed_path_raw = os.path.join(step2_raw_dir, f"{base_filename}_parsed.json")
-                try:
-                    parsed = parse_and_validate(assistant_text)
-                    parsed_dict = parsed.model_dump()
-                    # Save to raw folder
-                    _save_json_atomic(parsed_dict, parsed_path_raw)
-
-                    # Also save to classification-specific folder (order/not_order/needs_manual)
-                    classification = parsed.classification
-                    if classification == "order":
-                        classified_path = os.path.join(step2_order_dir, f"{base_filename}.json")
-                    elif classification == "not_order":
-                        classified_path = os.path.join(step2_not_order_dir, f"{base_filename}.json")
-                    else:  # needs_manual
-                        classified_path = os.path.join(step2_needs_manual_dir, f"{base_filename}.json")
-
-                    _save_json_atomic(parsed_dict, classified_path)
-                    logging.info("Classification: %s → saved to %s", classification, classified_path)
-
-                except Exception as e:
-                    # Save parsing error and assistant text for manual review
-                    err_path = os.path.join(step2_raw_dir, f"{base_filename}_parse_error.txt")
-                    with open(err_path, "w", encoding="utf-8") as ef:
-                        ef.write("--- ASSISTANT TEXT ---\n")
-                        ef.write(assistant_text or "")
-                        ef.write("\n--- PARSE ERROR ---\n")
-                        ef.write(repr(e))
-                    logging.error("Failed to parse response for %s: %s", base_filename, e)
-
-                # Decide marking as read
-                mark_read = False
-                if parsed is not None:
-                    try:
-                        # parsed is a pydantic model
-                        cls = parsed.classification
-                        conf = float(parsed.confidence or 0.0)
-                        if cls != "needs_manual" and conf >= 0.85:
-                            mark_read = True
-                    except Exception:
-                        mark_read = False
-
-                if mark_read:
-                    try:
-                        mark_as_read(service, mid)
-                        logging.info("Marked message %s as read (classification=%s).", mid, getattr(parsed, "classification", None))
-                    except Exception as e:
-                        logging.warning("Failed to mark as read: %s", e)
-                else:
-                    logging.info("Left message %s unread (mark_read=%s).", mid, mark_read)
-
-            except Exception as e:
-                logging.exception("LLM pipeline failed for message %s: %s", mid, e)
-                # Save the exception
-                errf = os.path.join(step2_raw_dir, f"{base_filename}_llm_error.txt")
-                with open(errf, "w", encoding="utf-8") as ef:
-                    ef.write(repr(e))
-        else:
-            logging.info("AI pipeline not available — skipped LLM call for %s.", base_filename)
-
-    logging.info("Done.")
+    logging.info("Done. Processed %d emails. Run step2_ai_order_validation.py to classify them.", len(message_ids))
 
 
 if __name__ == "__main__":
