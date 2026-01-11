@@ -36,7 +36,7 @@ PROMPTS_DIR = os.getenv("PROMPTS_DIR", "prompts")
 
 # LLM settings
 MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-TEMPERATURE = 0.0
+TEMPERATURE = 0.1
 TIMEOUT = int(os.getenv("OPENAI_TIMEOUT", "60"))
 
 # Classification thresholds for auto-marking emails as read
