@@ -12,9 +12,13 @@ token.json
 # Runtime outputs
 out_step1_email_inputs/
 out_step2_ai_order_validation/
+out_step3_reference_validation/
 model_outputs/
 email_inputs/
 downloads/
+
+# Data files
+reference_data/
 
 # Secrets
 .env

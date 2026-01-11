@@ -11,6 +11,7 @@ The project is organized into independent steps that can be run separately:
 
 - **Step 1** (step1_email_reader.py): Reads Gmail emails and extracts order data
 - **Step 2** (step2_ai_order_validation.py): Classifies orders using LLM
+- **Step 3** (step3_reference_validation.py): Validates VIP numbers and product codes against reference data
 - **AI package** (ai/): Reusable AI utilities for all LLM-powered steps
 
 Structure
@@ -19,6 +20,7 @@ Structure
 project/
 ├── step1_email_reader.py        # Step 1: Gmail email extraction
 ├── step2_ai_order_validation.py # Step 2: LLM order classification
+├── step3_reference_validation.py # Step 3: VIP & product code validation
 ├── ai/                          # Reusable AI utilities
 │   ├── __init__.py
 │   ├── core.py                  # High-level LLM pipeline functions
@@ -27,6 +29,9 @@ project/
 │   └── schemas.py               # Pydantic validation schemas
 ├── prompts/                     # LLM prompt templates
 │   └── order_classification.md
+├── reference_data/              # Reference files for validation
+│   ├── VIP.xlsx                 # Valid VIP numbers
+│   └── product_codes.xls        # Valid product codes
 ├── out_step1_email_inputs/      # Step 1 output (extracted emails)
 │   └── YYYYMMDD_HHMMSS/         # Batch timestamp folder
 │       └── *.json               # One JSON per email
@@ -36,6 +41,13 @@ project/
 │       ├── order/               # Confirmed orders
 │       ├── not_order/           # Non-orders (marketing, etc.)
 │       └── needs_manual/        # Requires human review
+├── out_step3_reference_validation/ # Step 3 output (validated orders)
+│   └── YYYYMMDD_HHMMSS/         # Batch timestamp folder
+│       ├── extracted_reference_data/   # Extracted VIP & product lists
+│       ├── valid_data/          # Orders with valid VIP & products
+│       ├── invalid_data/        # Orders with invalid VIP or products
+│       ├── step3_report.json    # Validation summary
+│       └── step3_summary.csv    # CSV summary of all orders
 ├── credentials.json             # Gmail OAuth credentials
 ├── token.json                   # Gmail OAuth token (auto-generated)
 └── .env.example                 # Environment config template
@@ -48,11 +60,15 @@ Usage
 1. Create `.env` from `.env.example` and set `OPENAI_API_KEY`
 2. Install dependencies:
    ```bash
-   pip install requests pydantic beautifulsoup4 google-api-python-client openpyxl pyexcel pyexcel-xls python-dotenv
+   pip install requests pydantic beautifulsoup4 google-api-python-client openpyxl pyexcel pyexcel-xls python-dotenv pandas xlrd
    ```
 3. Set up Gmail OAuth:
    - Download OAuth credentials from Google Cloud Console
    - Save as `credentials.json` in project root
+4. Add reference data (for step3):
+   - Create `reference_data/` folder
+   - Add `VIP.xlsx` with valid VIP numbers
+   - Add `product_codes.xls` with valid product codes
 
 ### Running the Pipeline
 
@@ -84,7 +100,23 @@ python step2_ai_order_validation.py --batch 20260110_130000
 ```
 - Reads emails from step1 output
 - Calls LLM for classification
-- Saves results to `out_step2_order_classification/TIMESTAMP/`
+- Saves results to `out_step2_ai_order_validation/TIMESTAMP/`
+
+Step 3 - Validate against reference data:
+```bash
+# Auto-detect latest batch (recommended)
+python step3_reference_validation.py
+
+# Specify custom paths
+python step3_reference_validation.py \
+  --step2_input out_step2_ai_order_validation/20260110_130000/order \
+  --vip_file reference_data/VIP.xlsx \
+  --product_file reference_data/product_codes.xls
+```
+- Reads classified orders from step2
+- Validates VIP numbers against VIP.xlsx
+- Validates product codes against product_codes.xls
+- Saves valid/invalid orders to `out_step3_reference_validation/TIMESTAMP/`
 
 AI Package (ai/)
 ----------------
@@ -121,14 +153,17 @@ response = call_llm_and_save(
 Model Output Format
 -------------------
 
-The LLM returns structured JSON with multiple orders:
+The LLM returns structured JSON with multiple orders. Each email can contain multiple orders,
+and all orders from the same email share the same `email_id`:
 
 ```json
 {
+  "email_id": "19bad18a2820ecc7",
   "classification": "order" | "not_order" | "needs_manual",
   "confidence": 0.0-1.0,
   "orders": [
     {
+      "email_id": "19bad18a2820ecc7",
       "vip_number": "12345",
       "items": [
         {"product_code": "3000950", "qty": 2}
@@ -140,6 +175,9 @@ The LLM returns structured JSON with multiple orders:
   ]
 }
 ```
+
+**Important:** `email_id` is propagated through all steps (Step1 → Step2 → Step3) to track which
+email each order originated from. When one email contains multiple orders, they all share the same `email_id`.
 
 **Classification Logic:**
 - `order`: All orders are valid and actionable
@@ -153,9 +191,12 @@ Emails are marked as read when:
 
 Notes
 -----
-- **Separate steps**: Step 1 extracts emails, Step 2 classifies them
+- **Separate steps**: Step 1 extracts emails, Step 2 classifies them, Step 3 validates
 - **In-memory processing**: Excel attachments are never saved to disk
 - **Multi-order support**: One email can contain multiple orders (same or different VIP numbers)
+- **Email tracking**: Each order has `email_id` to trace back to the original email
+  - All orders from the same email share the same `email_id`
+  - `email_id` is preserved through all steps (Step1 → Step2 → Step3)
 - **Batch organization**: Each run creates a timestamped folder
 - **Reusable AI layer**: `ai/` package can be used for future steps (step3, step4, etc.)
 - **Non-Excel attachments**: PDFs, images, etc. are skipped (metadata recorded only)
